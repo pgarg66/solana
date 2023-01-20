@@ -11,7 +11,7 @@ edition = "2021"
 
 [dependencies]
 async-mutex = "1.4.0"
-async-trait = "0.1.57"
+async-trait = "0.1.62"
 futures = "0.3"
 itertools = "0.10.5"
 lazy_static = "1.4.0"
