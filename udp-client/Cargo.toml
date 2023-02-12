@@ -10,7 +10,7 @@ documentation = "https://docs.rs/solana-udp-client"
 edition = "2021"
 
 [dependencies]
-async-trait = "0.1.57"
+async-trait = "0.1.64"
 
 solana-connection-cache = { path = "../connection-cache", version = "=1.16.0", default-features = false }
 solana-net-utils = { path = "../net-utils", version = "=1.16.0" }
