@@ -6829,7 +6829,7 @@ impl Bank {
     }
 
     pub fn fee_structure(&self) -> &FeeStructure {
-        &self.transaction_processor.fee_structure
+        self.transaction_processor.fee_structure()
     }
 
     pub fn compute_budget(&self) -> Option<ComputeBudget> {

@@ -139,6 +139,10 @@ pub struct TransactionProcessingEnvironment<'a> {
 }
 
 #[cfg_attr(feature = "frozen-abi", derive(AbiExample))]
+#[cfg_attr(
+    feature = "dev-context-only-utils",
+    field_qualifiers(fee_structure(pub))
+)]
 pub struct TransactionBatchProcessor<FG: ForkGraph> {
     /// Bank slot (i.e. block)
     slot: Slot,
@@ -150,7 +154,7 @@ pub struct TransactionBatchProcessor<FG: ForkGraph> {
     pub epoch_schedule: EpochSchedule,
 
     /// Transaction fee structure
-    pub fee_structure: FeeStructure,
+    fee_structure: FeeStructure,
 
     /// SysvarCache is a collection of system variables that are
     /// accessible from on chain programs. It is passed to SVM from
@@ -222,6 +226,10 @@ impl<FG: ForkGraph> TransactionBatchProcessor<FG> {
             program_cache: self.program_cache.clone(),
             builtin_program_ids: RwLock::new(self.builtin_program_ids.read().unwrap().clone()),
         }
+    }
+
+    pub fn fee_structure(&self) -> &FeeStructure {
+        &self.fee_structure
     }
 
     /// Returns the current environments depending on the given epoch
