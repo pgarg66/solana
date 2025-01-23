@@ -6136,6 +6136,7 @@ name = "solana-log-collector"
 version = "2.2.0"
 dependencies = [
  "log",
+ "qualifier_attr",
 ]
 
 [[package]]
