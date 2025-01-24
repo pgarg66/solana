@@ -74,6 +74,7 @@ const STACK_FRAME_SIZE: usize = 4096;
         alt_bn128_g2_decompress(pub),
     )
 )]
+#[non_exhaustive]
 pub struct ComputeBudget {
     /// Number of compute units that a transaction or individual instruction is
     /// allowed to consume. Compute units are consumed by program execution,

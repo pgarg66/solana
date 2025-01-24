@@ -1,5 +1,5 @@
 #[cfg(any(feature = "dev-context-only-utils", feature = "svm-internal"))]
-use qualifier_attr::{field_qualifiers, qualifiers};
+use qualifier_attr::qualifiers;
 use {
     solana_fee_structure::FeeBudgetLimits, solana_program_entrypoint::HEAP_LENGTH,
     std::num::NonZeroU32,
@@ -39,21 +39,11 @@ const MAX_LOADED_ACCOUNTS_DATA_SIZE_BYTES: NonZeroU32 =
     unsafe { NonZeroU32::new_unchecked(64 * 1024 * 1024) };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(
-    any(feature = "dev-context-only-utils", feature = "svm-internal"),
-    qualifiers(pub),
-    field_qualifiers(
-        updated_heap_bytes(pub),
-        compute_unit_limit(pub),
-        compute_unit_price(pub),
-        loaded_accounts_bytes(pub)
-    )
-)]
-pub(crate) struct ComputeBudgetLimits {
-    pub(crate) updated_heap_bytes: u32,
-    pub(crate) compute_unit_limit: u32,
-    compute_unit_price: u64,
-    loaded_accounts_bytes: NonZeroU32,
+pub struct ComputeBudgetLimits {
+    pub updated_heap_bytes: u32,
+    pub compute_unit_limit: u32,
+    pub compute_unit_price: u64,
+    pub loaded_accounts_bytes: NonZeroU32,
 }
 
 impl Default for ComputeBudgetLimits {
