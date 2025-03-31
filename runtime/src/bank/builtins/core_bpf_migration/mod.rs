@@ -165,7 +165,7 @@ impl Bank {
                     Hash::default(),
                     0,
                     0,
-                    &|_| 0,
+                    self,
                     self.feature_set.clone(),
                     &sysvar_cache,
                 ),

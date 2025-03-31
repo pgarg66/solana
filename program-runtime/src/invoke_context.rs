@@ -31,6 +31,7 @@ use {
         bpf_loader, bpf_loader_deprecated, bpf_loader_upgradeable, loader_v4, native_loader, sysvar,
     },
     solana_stable_layout::stable_instruction::StableInstruction,
+    solana_svm_callback::TransactionProcessingCallback,
     solana_timings::{ExecuteDetailsTimings, ExecuteTimings},
     solana_transaction_context::{
         IndexOfAccount, InstructionAccount, TransactionAccount, TransactionContext,
@@ -147,7 +148,7 @@ pub struct EnvironmentConfig<'a> {
     pub blockhash: Hash,
     pub blockhash_lamports_per_signature: u64,
     epoch_total_stake: u64,
-    get_epoch_vote_account_stake_callback: &'a dyn Fn(&'a Pubkey) -> u64,
+    callbacks: &'a dyn TransactionProcessingCallback,
     pub feature_set: Arc<FeatureSet>,
     sysvar_cache: &'a SysvarCache,
 }
@@ -156,7 +157,7 @@ impl<'a> EnvironmentConfig<'a> {
         blockhash: Hash,
         blockhash_lamports_per_signature: u64,
         epoch_total_stake: u64,
-        get_epoch_vote_account_stake_callback: &'a dyn Fn(&'a Pubkey) -> u64,
+        callbacks: &'a dyn TransactionProcessingCallback,
         feature_set: Arc<FeatureSet>,
         sysvar_cache: &'a SysvarCache,
     ) -> Self {
@@ -164,7 +165,7 @@ impl<'a> EnvironmentConfig<'a> {
             blockhash,
             blockhash_lamports_per_signature,
             epoch_total_stake,
-            get_epoch_vote_account_stake_callback,
+            callbacks,
             feature_set,
             sysvar_cache,
         }
@@ -672,9 +673,9 @@ impl<'a> InvokeContext<'a> {
 
     /// Get cached stake for the epoch vote account.
     pub fn get_epoch_vote_account_stake(&self, pubkey: &'a Pubkey) -> u64 {
-        (self
-            .environment_config
-            .get_epoch_vote_account_stake_callback)(pubkey)
+        self.environment_config
+            .callbacks
+            .get_current_epoch_vote_account_stake(pubkey)
     }
 
     // Should alignment be enforced during user pointer translation
@@ -735,6 +736,7 @@ macro_rules! with_mock_invoke_context {
         use {
             agave_feature_set::FeatureSet,
             solana_log_collector::LogCollector,
+            solana_svm_callback::TransactionProcessingCallback,
             solana_type_overrides::sync::Arc,
             $crate::{
                 __private::{Hash, ReadableAccount, Rent, TransactionContext},
@@ -744,6 +746,17 @@ macro_rules! with_mock_invoke_context {
                 sysvar_cache::SysvarCache,
             },
         };
+        struct MockCallback {}
+        impl TransactionProcessingCallback for MockCallback {
+            fn account_matches_owners(&self, _: &Pubkey, _: &[Pubkey]) -> Option<usize> {
+                None
+            }
+
+            fn get_account_shared_data(&self, _: &Pubkey) -> Option<AccountSharedData> {
+                None
+            }
+        }
+
         let compute_budget = SVMTransactionExecutionBudget::default();
         let mut $transaction_context = TransactionContext::new(
             $transaction_accounts,
@@ -773,7 +786,7 @@ macro_rules! with_mock_invoke_context {
             Hash::default(),
             0,
             0,
-            &|_| 0,
+            &MockCallback {},
             Arc::new(FeatureSet::all_enabled()),
             &sysvar_cache,
         );

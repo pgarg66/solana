@@ -142,9 +142,21 @@ mod tests {
         solana_sdk_ids::{ed25519_program, native_loader, secp256k1_program, system_program},
         solana_secp256k1_program::new_secp256k1_instruction,
         solana_secp256r1_program::new_secp256r1_instruction,
+        solana_svm_callback::TransactionProcessingCallback,
         solana_transaction_context::TransactionContext,
         std::sync::Arc,
     };
+
+    struct MockCallback {}
+    impl TransactionProcessingCallback for MockCallback {
+        fn account_matches_owners(&self, _: &Pubkey, _: &[Pubkey]) -> Option<usize> {
+            None
+        }
+
+        fn get_account_shared_data(&self, _: &Pubkey) -> Option<AccountSharedData> {
+            None
+        }
+    }
 
     fn create_loadable_account_for_test(name: &str) -> AccountSharedData {
         let (lamports, rent_epoch) = DUMMY_INHERITABLE_ACCOUNT_FIELDS;
@@ -255,7 +267,7 @@ mod tests {
             Hash::default(),
             0,
             0,
-            &|_| 0,
+            &MockCallback {},
             Arc::new(FeatureSet::all_enabled()),
             &sysvar_cache,
         );
@@ -310,7 +322,7 @@ mod tests {
             Hash::default(),
             0,
             0,
-            &|_| 0,
+            &MockCallback {},
             Arc::new(FeatureSet::all_enabled()),
             &sysvar_cache,
         );
@@ -355,7 +367,7 @@ mod tests {
             Hash::default(),
             0,
             0,
-            &|_| 0,
+            &MockCallback {},
             Arc::new(FeatureSet::all_enabled()),
             &sysvar_cache,
         );
@@ -491,7 +503,7 @@ mod tests {
             Hash::default(),
             0,
             0,
-            &|_| 0,
+            &MockCallback {},
             Arc::new(FeatureSet::all_enabled()),
             &sysvar_cache,
         );
@@ -531,7 +543,7 @@ mod tests {
             Hash::default(),
             0,
             0,
-            &|_| 0,
+            &MockCallback {},
             Arc::new(FeatureSet::all_enabled()),
             &sysvar_cache,
         );
@@ -568,7 +580,7 @@ mod tests {
             Hash::default(),
             0,
             0,
-            &|_| 0,
+            &MockCallback {},
             Arc::new(FeatureSet::all_enabled()),
             &sysvar_cache,
         );
@@ -672,7 +684,7 @@ mod tests {
             Hash::default(),
             0,
             0,
-            &|_| 0,
+            &MockCallback {},
             Arc::new(FeatureSet::all_enabled()),
             &sysvar_cache,
         );

@@ -4926,7 +4926,7 @@ mod tests {
             Hash::default(),
             0,
             expected_total_stake,
-            &|_| 0, // Vote accounts are not needed for this test.
+            &MockCallback {},
             Arc::<FeatureSet>::default(),
             &sysvar_cache,
         );
@@ -4971,12 +4971,29 @@ mod tests {
 
         let vote_address = Pubkey::new_unique();
         with_mock_invoke_context!(invoke_context, transaction_context, vec![]);
-        let callback = |pubkey: &Pubkey| {
-            if *pubkey == vote_address {
-                expected_epoch_stake
-            } else {
-                0
+        struct TestCallback {
+            vote_address: Pubkey,
+            expected_epoch_stake: u64,
+        }
+        impl TransactionProcessingCallback for TestCallback {
+            fn account_matches_owners(&self, _: &Pubkey, _: &[Pubkey]) -> Option<usize> {
+                None
             }
+
+            fn get_account_shared_data(&self, _: &Pubkey) -> Option<AccountSharedData> {
+                None
+            }
+            fn get_current_epoch_vote_account_stake(&self, pubkey: &Pubkey) -> u64 {
+                if *pubkey == self.vote_address {
+                    self.expected_epoch_stake
+                } else {
+                    0
+                }
+            }
+        }
+        let callback = TestCallback {
+            vote_address,
+            expected_epoch_stake,
         };
         invoke_context.environment_config = EnvironmentConfig::new(
             Hash::default(),
