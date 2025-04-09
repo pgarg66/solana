@@ -1806,6 +1806,7 @@ mod test_utils {
 mod tests {
     use {
         super::*,
+        agave_feature_set::FeatureSet,
         assert_matches::assert_matches,
         rand::Rng,
         solana_account::{
@@ -1816,7 +1817,8 @@ mod tests {
         solana_epoch_schedule::EpochSchedule,
         solana_instruction::{error::InstructionError, AccountMeta},
         solana_program_runtime::{
-            invoke_context::mock_process_instruction, with_mock_invoke_context,
+            invoke_context::{mock_process_instruction, mock_process_instruction_with_feature_set},
+            with_mock_invoke_context,
         },
         solana_pubkey::Pubkey,
         solana_rent::Rent,
@@ -1935,8 +1937,10 @@ mod tests {
             |_invoke_context| {},
         );
 
+        let mut feature_set = FeatureSet::all_enabled();
+        feature_set.deactivate(&remove_accounts_executable_flag_checks::id());
         // Case: Account not a program
-        mock_process_instruction(
+        mock_process_instruction_with_feature_set(
             &loader_id,
             vec![0],
             &[],
@@ -1945,12 +1949,10 @@ mod tests {
             Err(InstructionError::IncorrectProgramId),
             Entrypoint::vm,
             |invoke_context| {
-                let mut feature_set = invoke_context.get_feature_set().clone();
-                feature_set.deactivate(&remove_accounts_executable_flag_checks::id());
-                invoke_context.mock_set_feature_set(Arc::new(feature_set));
                 test_utils::load_all_invoked_programs(invoke_context);
             },
             |_invoke_context| {},
+            &feature_set,
         );
         process_instruction(
             &loader_id,
@@ -2630,7 +2632,9 @@ mod tests {
         );
         *instruction_accounts.get_mut(1).unwrap() = instruction_accounts.get(2).unwrap().clone();
         let instruction_data = bincode::serialize(&UpgradeableLoaderInstruction::Upgrade).unwrap();
-        mock_process_instruction(
+        let mut feature_set = FeatureSet::all_enabled();
+        feature_set.deactivate(&remove_accounts_executable_flag_checks::id());
+        mock_process_instruction_with_feature_set(
             &bpf_loader_upgradeable::id(),
             Vec::new(),
             &instruction_data,
@@ -2639,12 +2643,10 @@ mod tests {
             Err(InstructionError::AccountNotExecutable),
             Entrypoint::vm,
             |invoke_context| {
-                let mut feature_set = invoke_context.get_feature_set().clone();
-                feature_set.deactivate(&remove_accounts_executable_flag_checks::id());
-                invoke_context.mock_set_feature_set(Arc::new(feature_set));
                 test_utils::load_all_invoked_programs(invoke_context);
             },
             |_invoke_context| {},
+            &feature_set,
         );
         process_instruction(
             transaction_accounts.clone(),

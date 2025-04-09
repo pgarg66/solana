@@ -6,7 +6,7 @@
 )]
 pub use solana_sdk_ids::stake::{check_id, id};
 use {
-    agave_feature_set::{self as feature_set, FeatureSet},
+    agave_feature_set::{self as feature_set, FeatureSetLookup},
     solana_genesis_config::GenesisConfig,
     solana_native_token::LAMPORTS_PER_SOL,
 };
@@ -25,7 +25,7 @@ pub fn add_genesis_accounts(genesis_config: &mut GenesisConfig) -> u64 {
 /// NOTE: This is also used to calculate the minimum balance of a delegated stake account,
 /// which is the rent exempt reserve _plus_ the minimum stake delegation.
 #[inline(always)]
-pub fn get_minimum_delegation(feature_set: &FeatureSet) -> u64 {
+pub fn get_minimum_delegation(feature_set: &dyn FeatureSetLookup) -> u64 {
     if feature_set.is_active(&feature_set::stake_raise_minimum_delegation_to_1_sol::id()) {
         const MINIMUM_DELEGATION_SOL: u64 = 1;
         MINIMUM_DELEGATION_SOL * LAMPORTS_PER_SOL

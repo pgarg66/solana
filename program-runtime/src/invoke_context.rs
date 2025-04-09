@@ -9,7 +9,7 @@ use {
         sysvar_cache::SysvarCache,
     },
     agave_feature_set::{
-        lift_cpi_caller_restriction, remove_accounts_executable_flag_checks, FeatureSet,
+        lift_cpi_caller_restriction, remove_accounts_executable_flag_checks, FeatureSetLookup,
     },
     solana_account::{create_account_shared_data_for_test, AccountSharedData},
     solana_clock::Slot,
@@ -35,12 +35,13 @@ use {
     solana_transaction_context::{
         IndexOfAccount, InstructionAccount, TransactionAccount, TransactionContext,
     },
-    solana_type_overrides::sync::{atomic::Ordering, Arc},
+    solana_type_overrides::sync::atomic::Ordering,
     std::{
         alloc::Layout,
         cell::RefCell,
         fmt::{self, Debug},
         rc::Rc,
+        sync::Arc,
     },
 };
 
@@ -147,7 +148,7 @@ pub struct EnvironmentConfig<'a> {
     pub blockhash: Hash,
     pub blockhash_lamports_per_signature: u64,
     epoch_stake_callback: &'a dyn InvokeContextCallback,
-    pub feature_set: Arc<FeatureSet>,
+    pub feature_set: &'a dyn FeatureSetLookup,
     sysvar_cache: &'a SysvarCache,
 }
 impl<'a> EnvironmentConfig<'a> {
@@ -155,7 +156,7 @@ impl<'a> EnvironmentConfig<'a> {
         blockhash: Hash,
         blockhash_lamports_per_signature: u64,
         epoch_stake_callback: &'a dyn InvokeContextCallback,
-        feature_set: Arc<FeatureSet>,
+        feature_set: &'a dyn FeatureSetLookup,
         sysvar_cache: &'a SysvarCache,
     ) -> Self {
         Self {
@@ -646,14 +647,14 @@ impl<'a> InvokeContext<'a> {
     }
 
     /// Get the current feature set.
-    pub fn get_feature_set(&self) -> &FeatureSet {
-        &self.environment_config.feature_set
+    pub fn get_feature_set(&self) -> &'a dyn FeatureSetLookup {
+        self.environment_config.feature_set
     }
 
     /// Set feature set.
     ///
     /// Only use for tests and benchmarks.
-    pub fn mock_set_feature_set(&mut self, feature_set: Arc<FeatureSet>) {
+    pub fn mock_set_feature_set(&mut self, feature_set: &'a dyn FeatureSetLookup) {
         self.environment_config.feature_set = feature_set;
     }
 
@@ -730,18 +731,53 @@ impl<'a> InvokeContext<'a> {
     }
 }
 
+#[derive(Clone, Default)]
+pub struct MockFeatureSet {
+    // By default, the feature set is not enabled, and all features are disabled
+    enabled: bool,
+    pub disabled: Vec<Pubkey>,
+}
+
+impl MockFeatureSet {
+    pub fn all_enabled() -> Self {
+        Self {
+            enabled: true,
+            disabled: vec![],
+        }
+    }
+
+    pub fn deactivate(&mut self, feature: &Pubkey) {
+        if self.is_active(feature) {
+            self.disabled.push(*feature);
+        }
+    }
+}
+
+impl FeatureSetLookup for MockFeatureSet {
+    fn is_active(&self, pubkey: &Pubkey) -> bool {
+        self.enabled && !self.disabled.contains(pubkey)
+    }
+
+    fn activated_slot(&self, feature_id: &Pubkey) -> Option<u64> {
+        if self.is_active(feature_id) {
+            Some(0)
+        } else {
+            None
+        }
+    }
+}
+
 #[macro_export]
-macro_rules! with_mock_invoke_context {
+macro_rules! with_mock_invoke_context_and_feature_set {
     (
         $invoke_context:ident,
         $transaction_context:ident,
+        $feature_set:ident,
         $transaction_accounts:expr $(,)?
     ) => {
         use {
-            agave_feature_set::FeatureSet,
             solana_log_collector::LogCollector,
             solana_svm_callback::InvokeContextCallback,
-            solana_type_overrides::sync::Arc,
             $crate::{
                 __private::{Hash, ReadableAccount, Rent, TransactionContext},
                 execution_budget::{SVMTransactionExecutionBudget, SVMTransactionExecutionCost},
@@ -783,7 +819,7 @@ macro_rules! with_mock_invoke_context {
             Hash::default(),
             0,
             &MockInvokeContextCallback {},
-            Arc::new(FeatureSet::all_enabled()),
+            $feature_set,
             &sysvar_cache,
         );
         let mut program_cache_for_tx_batch = ProgramCacheForTxBatch::default();
@@ -798,7 +834,29 @@ macro_rules! with_mock_invoke_context {
     };
 }
 
-pub fn mock_process_instruction<F: FnMut(&mut InvokeContext), G: FnMut(&mut InvokeContext)>(
+#[macro_export]
+macro_rules! with_mock_invoke_context {
+    (
+        $invoke_context:ident,
+        $transaction_context:ident,
+        $transaction_accounts:expr $(,)?
+    ) => {
+        use $crate::{invoke_context::MockFeatureSet, with_mock_invoke_context_and_feature_set};
+        let feature_set = &MockFeatureSet::all_enabled();
+        with_mock_invoke_context_and_feature_set!(
+            $invoke_context,
+            $transaction_context,
+            feature_set,
+            $transaction_accounts,
+        )
+    };
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn mock_process_instruction_with_feature_set<
+    F: FnMut(&mut InvokeContext),
+    G: FnMut(&mut InvokeContext),
+>(
     loader_id: &Pubkey,
     mut program_indices: Vec<IndexOfAccount>,
     instruction_data: &[u8],
@@ -808,6 +866,7 @@ pub fn mock_process_instruction<F: FnMut(&mut InvokeContext), G: FnMut(&mut Invo
     builtin_function: BuiltinFunctionWithContext,
     mut pre_adjustments: F,
     mut post_adjustments: G,
+    feature_set: &dyn FeatureSetLookup,
 ) -> Vec<AccountSharedData> {
     let mut instruction_accounts: Vec<InstructionAccount> =
         Vec::with_capacity(instruction_account_metas.len());
@@ -850,7 +909,12 @@ pub fn mock_process_instruction<F: FnMut(&mut InvokeContext), G: FnMut(&mut Invo
     } else {
         false
     };
-    with_mock_invoke_context!(invoke_context, transaction_context, transaction_accounts);
+    with_mock_invoke_context_and_feature_set!(
+        invoke_context,
+        transaction_context,
+        feature_set,
+        transaction_accounts
+    );
     let mut program_cache_for_tx_batch = ProgramCacheForTxBatch::default();
     program_cache_for_tx_batch.replenish(
         *loader_id,
@@ -873,6 +937,31 @@ pub fn mock_process_instruction<F: FnMut(&mut InvokeContext), G: FnMut(&mut Invo
     }
     transaction_accounts.pop();
     transaction_accounts
+}
+
+pub fn mock_process_instruction<F: FnMut(&mut InvokeContext), G: FnMut(&mut InvokeContext)>(
+    loader_id: &Pubkey,
+    program_indices: Vec<IndexOfAccount>,
+    instruction_data: &[u8],
+    transaction_accounts: Vec<TransactionAccount>,
+    instruction_account_metas: Vec<AccountMeta>,
+    expected_result: Result<(), InstructionError>,
+    builtin_function: BuiltinFunctionWithContext,
+    pre_adjustments: F,
+    post_adjustments: G,
+) -> Vec<AccountSharedData> {
+    mock_process_instruction_with_feature_set(
+        loader_id,
+        program_indices,
+        instruction_data,
+        transaction_accounts,
+        instruction_account_metas,
+        expected_result,
+        builtin_function,
+        pre_adjustments,
+        post_adjustments,
+        &MockFeatureSet::all_enabled(),
+    )
 }
 
 #[cfg(test)]

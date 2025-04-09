@@ -2,7 +2,6 @@
 //! Receive and processes votes from validators
 pub use solana_vote_interface::state::{vote_state_versions::*, *};
 use {
-    agave_feature_set::{self as feature_set, FeatureSet},
     log::*,
     solana_account::{AccountSharedData, ReadableAccount, WritableAccount},
     solana_clock::{Clock, Epoch, Slot},
@@ -430,7 +429,6 @@ pub fn process_new_vote_state(
     timestamp: Option<i64>,
     epoch: Epoch,
     current_slot: Slot,
-    _feature_set: Option<&FeatureSet>,
 ) -> Result<(), VoteError> {
     assert!(!new_state.is_empty());
     if new_state.len() > MAX_LOCKOUT_HISTORY {
@@ -746,28 +744,25 @@ pub fn update_commission<S: std::hash::BuildHasher>(
     signers: &HashSet<Pubkey, S>,
     epoch_schedule: &EpochSchedule,
     clock: &Clock,
-    feature_set: &FeatureSet,
+    allow_commission_decrease_at_any_time: bool,
+    commission_updates_only_allowed_in_first_half_of_epoch: bool,
 ) -> Result<(), InstructionError> {
     // Decode vote state only once, and only if needed
     let mut vote_state = None;
 
-    let enforce_commission_update_rule =
-        if feature_set.is_active(&feature_set::allow_commission_decrease_at_any_time::id()) {
-            if let Ok(decoded_vote_state) = vote_account.get_state::<VoteStateVersions>() {
-                vote_state = Some(decoded_vote_state.convert_to_current());
-                is_commission_increase(vote_state.as_ref().unwrap(), commission)
-            } else {
-                true
-            }
+    let enforce_commission_update_rule = if allow_commission_decrease_at_any_time {
+        if let Ok(decoded_vote_state) = vote_account.get_state::<VoteStateVersions>() {
+            vote_state = Some(decoded_vote_state.convert_to_current());
+            is_commission_increase(vote_state.as_ref().unwrap(), commission)
         } else {
             true
-        };
+        }
+    } else {
+        true
+    };
 
     #[allow(clippy::collapsible_if)]
-    if enforce_commission_update_rule
-        && feature_set
-            .is_active(&feature_set::commission_updates_only_allowed_in_first_half_of_epoch::id())
-    {
+    if enforce_commission_update_rule && commission_updates_only_allowed_in_first_half_of_epoch {
         if !is_commission_update_allowed(clock.slot, epoch_schedule) {
             return Err(VoteError::CommissionUpdateTooLate.into());
         }
@@ -926,7 +921,6 @@ pub fn process_vote_with_account<S: std::hash::BuildHasher>(
     clock: &Clock,
     vote: &Vote,
     signers: &HashSet<Pubkey, S>,
-    _feature_set: &FeatureSet,
 ) -> Result<(), InstructionError> {
     let mut vote_state = verify_and_get_vote_state(vote_account, clock, signers)?;
 
@@ -947,7 +941,6 @@ pub fn process_vote_state_update<S: std::hash::BuildHasher>(
     clock: &Clock,
     vote_state_update: VoteStateUpdate,
     signers: &HashSet<Pubkey, S>,
-    feature_set: &FeatureSet,
 ) -> Result<(), InstructionError> {
     let mut vote_state = verify_and_get_vote_state(vote_account, clock, signers)?;
     do_process_vote_state_update(
@@ -956,7 +949,6 @@ pub fn process_vote_state_update<S: std::hash::BuildHasher>(
         clock.epoch,
         clock.slot,
         vote_state_update,
-        Some(feature_set),
     )?;
     set_vote_account_state(vote_account, vote_state)
 }
@@ -967,7 +959,6 @@ pub fn do_process_vote_state_update(
     epoch: u64,
     slot: u64,
     mut vote_state_update: VoteStateUpdate,
-    feature_set: Option<&FeatureSet>,
 ) -> Result<(), VoteError> {
     check_and_filter_proposed_vote_state(
         vote_state,
@@ -987,7 +978,6 @@ pub fn do_process_vote_state_update(
         vote_state_update.timestamp,
         epoch,
         slot,
-        feature_set,
     )
 }
 
@@ -997,7 +987,6 @@ pub fn process_tower_sync<S: std::hash::BuildHasher>(
     clock: &Clock,
     tower_sync: TowerSync,
     signers: &HashSet<Pubkey, S>,
-    feature_set: &FeatureSet,
 ) -> Result<(), InstructionError> {
     let mut vote_state = verify_and_get_vote_state(vote_account, clock, signers)?;
     do_process_tower_sync(
@@ -1006,7 +995,6 @@ pub fn process_tower_sync<S: std::hash::BuildHasher>(
         clock.epoch,
         clock.slot,
         tower_sync,
-        Some(feature_set),
     )?;
     set_vote_account_state(vote_account, vote_state)
 }
@@ -1017,7 +1005,6 @@ fn do_process_tower_sync(
     epoch: u64,
     slot: u64,
     mut tower_sync: TowerSync,
-    feature_set: Option<&FeatureSet>,
 ) -> Result<(), VoteError> {
     check_and_filter_proposed_vote_state(
         vote_state,
@@ -1037,7 +1024,6 @@ fn do_process_tower_sync(
         tower_sync.timestamp,
         epoch,
         slot,
-        feature_set,
     )
 }
 
@@ -1372,12 +1358,6 @@ mod tests {
             ..Clock::default()
         });
 
-        let mut feature_set = FeatureSet::default();
-        feature_set.activate(
-            &feature_set::commission_updates_only_allowed_in_first_half_of_epoch::id(),
-            1,
-        );
-
         let signers: HashSet<Pubkey> = vec![withdrawer_pubkey].into_iter().collect();
 
         // Increase commission in first half of epoch -- allowed
@@ -1396,7 +1376,8 @@ mod tests {
                 &signers,
                 &epoch_schedule,
                 &first_half_clock,
-                &feature_set
+                false,
+                true,
             ),
             Ok(())
         );
@@ -1417,7 +1398,8 @@ mod tests {
                 &signers,
                 &epoch_schedule,
                 &second_half_clock,
-                &feature_set
+                false,
+                true,
             ),
             Err(_)
         );
@@ -1438,7 +1420,8 @@ mod tests {
                 &signers,
                 &epoch_schedule,
                 &first_half_clock,
-                &feature_set
+                false,
+                true,
             ),
             Ok(())
         );
@@ -1459,7 +1442,8 @@ mod tests {
                 &signers,
                 &epoch_schedule,
                 &second_half_clock,
-                &feature_set
+                false,
+                true,
             ),
             Err(_)
         );
@@ -1473,7 +1457,6 @@ mod tests {
         );
 
         // Decrease commission in second half of epoch -- allowed because feature_set allows it
-        feature_set.activate(&feature_set::allow_commission_decrease_at_any_time::id(), 1);
         assert_matches!(
             update_commission(
                 &mut borrowed_account,
@@ -1481,7 +1464,8 @@ mod tests {
                 &signers,
                 &epoch_schedule,
                 &second_half_clock,
-                &feature_set
+                true,
+                true,
             ),
             Ok(())
         );
@@ -1790,7 +1774,6 @@ mod tests {
         new_root: Option<Slot>,
         timestamp: Option<i64>,
         epoch: Epoch,
-        feature_set: Option<&FeatureSet>,
     ) -> Result<(), VoteError> {
         process_new_vote_state(
             vote_state,
@@ -1799,7 +1782,6 @@ mod tests {
             timestamp,
             epoch,
             0,
-            feature_set,
         )
     }
 
@@ -1847,8 +1829,6 @@ mod tests {
             vec![227, 228, 229, 230, 231, 232, 233, 234, 235, 236],
         ];
 
-        let feature_set = FeatureSet::default();
-
         for vote_group in test_vote_groups {
             // Duplicate vote_state so that the new vote can be applied
             let mut vote_state_after_vote = vote_state.clone();
@@ -1872,7 +1852,6 @@ mod tests {
                     None,
                     0,
                     0,
-                    Some(&feature_set)
                 ),
                 Ok(())
             );
@@ -2052,8 +2031,6 @@ mod tests {
             ),
         ];
 
-        let feature_set = FeatureSet::default();
-
         // For each vote group, process all vote groups leading up to it and it itself, and ensure that the number of
         // credits earned is correct for both regular votes and vote state updates
         for i in 0..test_vote_groups.len() {
@@ -2088,7 +2065,6 @@ mod tests {
                         None,
                         0,
                         vote_group.1, // vote_group.1 is the slot in which the vote was cast
-                        Some(&feature_set)
                     ),
                     Ok(())
                 );
@@ -2183,8 +2159,6 @@ mod tests {
             ),
         ];
 
-        let feature_set = FeatureSet::default();
-
         // Initial vote state
         let mut vote_state = VoteState::new(&VoteInit::default(), &Clock::default());
 
@@ -2209,7 +2183,6 @@ mod tests {
                         None,
                         0,
                         proposed_vote_state.1, // proposed_vote_state.1 is the slot in which the proposed vote state was applied
-                        Some(&feature_set)
                     ),
                     Ok(())
                 );
@@ -2239,7 +2212,6 @@ mod tests {
                 None,
                 None,
                 current_epoch,
-                None
             ),
             Err(VoteError::TooManyVotes)
         );
@@ -2270,7 +2242,6 @@ mod tests {
                 None,
                 current_epoch,
                 0,
-                None,
             ),
             Err(VoteError::RootRollBack)
         );
@@ -2285,7 +2256,6 @@ mod tests {
                 None,
                 current_epoch,
                 0,
-                None,
             ),
             Err(VoteError::RootRollBack)
         );
@@ -2309,7 +2279,6 @@ mod tests {
                 None,
                 None,
                 current_epoch,
-                None
             ),
             Err(VoteError::ZeroConfirmations)
         );
@@ -2327,7 +2296,6 @@ mod tests {
                 None,
                 None,
                 current_epoch,
-                None
             ),
             Err(VoteError::ZeroConfirmations)
         );
@@ -2351,7 +2319,6 @@ mod tests {
             None,
             None,
             current_epoch,
-            None,
         )
         .unwrap();
 
@@ -2369,7 +2336,6 @@ mod tests {
                 None,
                 None,
                 current_epoch,
-                None
             ),
             Err(VoteError::ConfirmationTooLarge)
         );
@@ -2394,7 +2360,6 @@ mod tests {
                 Some(root_slot),
                 None,
                 current_epoch,
-                None,
             ),
             Err(VoteError::SlotSmallerThanRoot)
         );
@@ -2412,7 +2377,6 @@ mod tests {
                 Some(root_slot),
                 None,
                 current_epoch,
-                None,
             ),
             Err(VoteError::SlotSmallerThanRoot)
         );
@@ -2436,7 +2400,6 @@ mod tests {
                 None,
                 None,
                 current_epoch,
-                None
             ),
             Err(VoteError::SlotsNotOrdered)
         );
@@ -2454,7 +2417,6 @@ mod tests {
                 None,
                 None,
                 current_epoch,
-                None
             ),
             Err(VoteError::SlotsNotOrdered)
         );
@@ -2478,7 +2440,6 @@ mod tests {
                 None,
                 None,
                 current_epoch,
-                None
             ),
             Err(VoteError::ConfirmationsNotOrdered)
         );
@@ -2496,7 +2457,6 @@ mod tests {
                 None,
                 None,
                 current_epoch,
-                None
             ),
             Err(VoteError::ConfirmationsNotOrdered)
         );
@@ -2522,7 +2482,6 @@ mod tests {
                 None,
                 None,
                 current_epoch,
-                None
             ),
             Err(VoteError::NewVoteStateLockoutMismatch)
         );
@@ -2538,15 +2497,8 @@ mod tests {
         ]
         .into_iter()
         .collect();
-        process_new_vote_state_from_lockouts(
-            &mut vote_state1,
-            votes,
-            None,
-            None,
-            current_epoch,
-            None,
-        )
-        .unwrap();
+        process_new_vote_state_from_lockouts(&mut vote_state1, votes, None, None, current_epoch)
+            .unwrap();
 
         let votes: VecDeque<Lockout> = vec![
             Lockout::new_with_confirmation_count(0, 4),
@@ -2565,7 +2517,6 @@ mod tests {
                 None,
                 None,
                 current_epoch,
-                None
             ),
             Err(VoteError::ConfirmationRollBack)
         );
@@ -2598,7 +2549,6 @@ mod tests {
                 None,
                 vote_state2.current_epoch(),
                 0,
-                None,
             )
             .unwrap();
 
@@ -2657,7 +2607,6 @@ mod tests {
             None,
             vote_state2.current_epoch(),
             0,
-            None,
         )
         .unwrap();
 
@@ -2700,7 +2649,6 @@ mod tests {
                 None,
                 vote_state2.current_epoch(),
                 0,
-                None
             ),
             Err(VoteError::LockoutConflict)
         );
@@ -2743,7 +2691,6 @@ mod tests {
                 None,
                 vote_state2.current_epoch(),
                 0,
-                None
             ),
             Err(VoteError::LockoutConflict)
         );
@@ -2789,7 +2736,6 @@ mod tests {
             None,
             vote_state2.current_epoch(),
             0,
-            None,
         )
         .unwrap();
         assert_eq!(vote_state1, vote_state2,);
@@ -2826,7 +2772,6 @@ mod tests {
                 root,
                 None,
                 current_epoch,
-                None
             ),
             Err(VoteError::LockoutConflict)
         );
@@ -2846,7 +2791,6 @@ mod tests {
             None,
             current_epoch,
             0,
-            None,
         )
         .unwrap();
         assert_eq!(vote_state1.votes, good_votes);
@@ -3039,15 +2983,9 @@ mod tests {
 
         // The proposed root slot should become the biggest slot in the current vote state less than
         // `earliest_slot_in_history`.
-        assert!(do_process_tower_sync(
-            &mut vote_state,
-            &slot_hashes,
-            0,
-            0,
-            tower_sync.clone(),
-            Some(&FeatureSet::all_enabled()),
-        )
-        .is_ok());
+        assert!(
+            do_process_tower_sync(&mut vote_state, &slot_hashes, 0, 0, tower_sync.clone(),).is_ok()
+        );
         assert_eq!(vote_state.root_slot, expected_root);
         assert_eq!(
             vote_state
@@ -3269,15 +3207,7 @@ mod tests {
                 Lockout::new_with_confirmation_count(vote_slot, 3)
             ]
         );
-        assert!(do_process_tower_sync(
-            &mut vote_state,
-            &slot_hashes,
-            0,
-            0,
-            tower_sync,
-            Some(&FeatureSet::all_enabled()),
-        )
-        .is_ok());
+        assert!(do_process_tower_sync(&mut vote_state, &slot_hashes, 0, 0, tower_sync,).is_ok());
     }
 
     #[test]
@@ -3322,15 +3252,7 @@ mod tests {
                 Lockout::new_with_confirmation_count(vote_slot, 2)
             ]
         );
-        assert!(do_process_tower_sync(
-            &mut vote_state,
-            &slot_hashes,
-            0,
-            0,
-            tower_sync,
-            Some(&FeatureSet::all_enabled()),
-        )
-        .is_ok());
+        assert!(do_process_tower_sync(&mut vote_state, &slot_hashes, 0, 0, tower_sync,).is_ok());
     }
 
     #[test]
@@ -3389,15 +3311,7 @@ mod tests {
                 Lockout::new_with_confirmation_count(vote_slot, 1)
             ]
         );
-        assert!(do_process_tower_sync(
-            &mut vote_state,
-            &slot_hashes,
-            0,
-            0,
-            tower_sync,
-            Some(&FeatureSet::all_enabled()),
-        )
-        .is_ok());
+        assert!(do_process_tower_sync(&mut vote_state, &slot_hashes, 0, 0, tower_sync,).is_ok());
     }
 
     #[test]
@@ -3559,15 +3473,7 @@ mod tests {
             ]
         );
 
-        assert!(do_process_tower_sync(
-            &mut vote_state,
-            &slot_hashes,
-            0,
-            0,
-            tower_sync,
-            Some(&FeatureSet::all_enabled()),
-        )
-        .is_ok());
+        assert!(do_process_tower_sync(&mut vote_state, &slot_hashes, 0, 0, tower_sync,).is_ok());
     }
 
     #[test]
@@ -3614,14 +3520,7 @@ mod tests {
         // should not have been popped off in the proposed state,
         // we should get a lockout conflict
         assert_eq!(
-            do_process_tower_sync(
-                &mut vote_state,
-                &slot_hashes,
-                0,
-                0,
-                tower_sync,
-                Some(&FeatureSet::all_enabled())
-            ),
+            do_process_tower_sync(&mut vote_state, &slot_hashes, 0, 0, tower_sync,),
             Err(VoteError::LockoutConflict)
         );
     }

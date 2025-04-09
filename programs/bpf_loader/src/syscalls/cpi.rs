@@ -1620,7 +1620,7 @@ mod tests {
         solana_clock::Epoch,
         solana_instruction::Instruction,
         solana_program_runtime::{
-            invoke_context::SerializedAccountMetadata, with_mock_invoke_context,
+            invoke_context::SerializedAccountMetadata, with_mock_invoke_context_and_feature_set,
         },
         solana_sbpf::{
             ebpf::MM_INPUT_START, memory_region::MemoryRegion, program::SBPFVersion, vm::Config,
@@ -1642,6 +1642,7 @@ mod tests {
          $transaction_accounts:expr,
          $program_accounts:expr,
          $instruction_accounts:expr) => {
+            use agave_feature_set::FeatureSet;
             let program_accounts = $program_accounts;
             let instruction_data = $instruction_data;
             let instruction_accounts = $instruction_accounts
@@ -1661,10 +1662,15 @@ mod tests {
                 .into_iter()
                 .map(|a| (a.0, a.1))
                 .collect::<Vec<TransactionAccount>>();
-            with_mock_invoke_context!($invoke_context, $transaction_context, transaction_accounts);
-            let mut feature_set = $invoke_context.get_feature_set().clone();
+            let mut feature_set = FeatureSet::all_enabled();
             feature_set.deactivate(&bpf_account_data_direct_mapping::id());
-            $invoke_context.mock_set_feature_set(Arc::new(feature_set));
+            let feature_set = &feature_set;
+            with_mock_invoke_context_and_feature_set!(
+                $invoke_context,
+                $transaction_context,
+                feature_set,
+                transaction_accounts
+            );
             $invoke_context
                 .transaction_context
                 .get_next_instruction_context()

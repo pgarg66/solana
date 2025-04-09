@@ -13,7 +13,7 @@ use {
     },
     solana_program_runtime::{
         execution_budget::SVMTransactionExecutionAndFeeBudgetLimits,
-        loaded_programs::ProgramCacheEntryType,
+        invoke_context::MockFeatureSet, loaded_programs::ProgramCacheEntryType,
     },
     solana_sdk::{
         account::{AccountSharedData, ReadableAccount, WritableAccount},
@@ -263,11 +263,19 @@ fn svm_concurrent() {
             let check_tx_data = std::mem::take(&mut check_data[idx]);
 
             thread::spawn(move || {
+                let feature_set = MockFeatureSet::default();
+                let processing_environment = TransactionProcessingEnvironment {
+                    blockhash: Hash::default(),
+                    blockhash_lamports_per_signature: 0,
+                    epoch_total_stake: 0,
+                    feature_set: &feature_set,
+                    rent_collector: None,
+                };
                 let result = local_batch.load_and_execute_sanitized_transactions(
                     &*local_bank,
                     &th_txs,
                     check_results,
-                    &TransactionProcessingEnvironment::default(),
+                    &processing_environment,
                     &processing_config,
                 );
 

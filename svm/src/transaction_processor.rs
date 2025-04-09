@@ -17,7 +17,7 @@ use {
         transaction_execution_result::{ExecutedTransaction, TransactionExecutionDetails},
         transaction_processing_result::{ProcessedTransaction, TransactionProcessingResult},
     },
-    agave_feature_set::{remove_accounts_executable_flag_checks, FeatureSet},
+    agave_feature_set::{remove_accounts_executable_flag_checks, FeatureSetLookup},
     log::debug,
     percentage::Percentage,
     solana_account::{state_traits::StateMut, AccountSharedData, ReadableAccount, PROGRAM_OWNERS},
@@ -115,7 +115,6 @@ pub struct TransactionProcessingConfig<'a> {
 }
 
 /// Runtime environment for transaction batch processing.
-#[derive(Default)]
 pub struct TransactionProcessingEnvironment<'a> {
     /// The blockhash to use for the transaction batch.
     pub blockhash: Hash,
@@ -129,7 +128,7 @@ pub struct TransactionProcessingEnvironment<'a> {
     /// The total stake for the current epoch.
     pub epoch_total_stake: u64,
     /// Runtime feature set to use for the transaction batch.
-    pub feature_set: Arc<FeatureSet>,
+    pub feature_set: &'a dyn FeatureSetLookup,
     /// Rent collector to use for the transaction batch.
     pub rent_collector: Option<&'a dyn SVMRentCollector>,
 }
@@ -373,7 +372,7 @@ impl<FG: ForkGraph> TransactionBatchProcessor<FG> {
         let mut account_loader = AccountLoader::new_with_account_cache_capacity(
             config.account_overrides,
             callbacks,
-            environment.feature_set.clone(),
+            environment.feature_set,
             account_keys_in_batch,
         );
 
@@ -551,7 +550,7 @@ impl<FG: ForkGraph> TransactionBatchProcessor<FG> {
 
         let fee_payer_loaded_rent_epoch = loaded_fee_payer.account.rent_epoch();
         loaded_fee_payer.rent_collected = collect_rent_from_account(
-            &account_loader.feature_set,
+            account_loader.feature_set,
             rent_collector,
             fee_payer_address,
             &mut loaded_fee_payer.account,
@@ -852,7 +851,7 @@ impl<FG: ForkGraph> TransactionBatchProcessor<FG> {
                 environment.blockhash,
                 environment.blockhash_lamports_per_signature,
                 callback,
-                Arc::clone(&environment.feature_set),
+                environment.feature_set,
                 sysvar_cache,
             ),
             log_collector.clone(),
@@ -1068,7 +1067,6 @@ mod tests {
             nonce_info::NonceInfo,
             rollback_accounts::RollbackAccounts,
         },
-        agave_feature_set::FeatureSet,
         agave_reserved_account_keys::ReservedAccountKeys,
         solana_account::{create_account_shared_data_for_test, WritableAccount},
         solana_clock::Clock,
@@ -1084,6 +1082,7 @@ mod tests {
             execution_budget::{
                 SVMTransactionExecutionAndFeeBudgetLimits, SVMTransactionExecutionBudget,
             },
+            invoke_context::MockFeatureSet,
             loaded_programs::{BlockRelation, ProgramCacheEntryType},
         },
         solana_rent::Rent,
@@ -1119,6 +1118,7 @@ mod tests {
         #[allow(clippy::type_complexity)]
         inspected_accounts:
             Arc<RwLock<HashMap<Pubkey, Vec<(Option<AccountSharedData>, /* is_writable */ bool)>>>>,
+        feature_set: MockFeatureSet,
     }
 
     impl InvokeContextCallback for MockBankCallback {}
@@ -1196,7 +1196,7 @@ mod tests {
             AccountLoader::new_with_account_cache_capacity(
                 None,
                 callbacks,
-                Arc::<FeatureSet>::default(),
+                &callbacks.feature_set,
                 0,
             )
         }
@@ -1234,12 +1234,20 @@ mod tests {
 
         let batch_processor = TransactionBatchProcessor::<TestForkGraph>::default();
         let callback = MockBankCallback::default();
+        let feature_set = MockFeatureSet::default();
+        let environment = TransactionProcessingEnvironment {
+            blockhash: Hash::default(),
+            blockhash_lamports_per_signature: 0,
+            epoch_total_stake: 0,
+            feature_set: &feature_set,
+            rent_collector: None,
+        };
 
         batch_processor.load_and_execute_sanitized_transactions(
             &callback,
             &sanitized_txs,
             check_results,
-            &TransactionProcessingEnvironment::default(),
+            &environment,
             &TransactionProcessingConfig::default(),
         );
     }
@@ -1329,7 +1337,14 @@ mod tests {
             loaded_accounts_data_size: 32,
         };
 
-        let processing_environment = TransactionProcessingEnvironment::default();
+        let feature_set = MockFeatureSet::default();
+        let processing_environment = TransactionProcessingEnvironment {
+            blockhash: Hash::default(),
+            blockhash_lamports_per_signature: 0,
+            epoch_total_stake: 0,
+            feature_set: &feature_set,
+            rent_collector: None,
+        };
 
         let mut processing_config = TransactionProcessingConfig::default();
         processing_config.recording_config.enable_log_recording = true;
@@ -1432,6 +1447,14 @@ mod tests {
         };
         let mut error_metrics = TransactionErrorMetrics::new();
         let mock_bank = MockBankCallback::default();
+        let feature_set = MockFeatureSet::default();
+        let processing_environment = TransactionProcessingEnvironment {
+            blockhash: Hash::default(),
+            blockhash_lamports_per_signature: 0,
+            epoch_total_stake: 0,
+            feature_set: &feature_set,
+            rent_collector: None,
+        };
 
         let _ = batch_processor.execute_loaded_transaction(
             &mock_bank,
@@ -1440,7 +1463,7 @@ mod tests {
             &mut ExecuteTimings::default(),
             &mut error_metrics,
             &mut program_cache_for_tx_batch,
-            &TransactionProcessingEnvironment::default(),
+            &processing_environment,
             &processing_config,
         );
 

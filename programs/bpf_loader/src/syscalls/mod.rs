@@ -22,7 +22,7 @@ use {
         enable_sbpf_v1_deployment_and_execution, enable_sbpf_v2_deployment_and_execution,
         enable_sbpf_v3_deployment_and_execution, get_sysvar_syscall_enabled,
         last_restart_slot_sysvar, reenable_sbpf_v0_execution,
-        remaining_compute_units_syscall_enabled, FeatureSet,
+        remaining_compute_units_syscall_enabled, FeatureSetLookup,
     },
     solana_account_info::AccountInfo,
     solana_big_mod_exp::{big_mod_exp, BigModExpParams},
@@ -332,7 +332,7 @@ pub(crate) fn morph_into_deployment_environment_v1(
 }
 
 pub fn create_program_runtime_environment_v1<'a>(
-    feature_set: &FeatureSet,
+    feature_set: &dyn FeatureSetLookup,
     compute_budget: &SVMTransactionExecutionBudget,
     reject_deployment_of_broken_elfs: bool,
     debugging_features: bool,
@@ -2245,6 +2245,7 @@ mod tests {
     use {
         super::*,
         crate::mock_create_vm,
+        agave_feature_set::FeatureSet,
         assert_matches::assert_matches,
         core::slice,
         solana_account::{create_account_shared_data_for_test, AccountSharedData},
@@ -2256,7 +2257,10 @@ mod tests {
         solana_instruction::Instruction,
         solana_last_restart_slot::LastRestartSlot,
         solana_program::program::check_type_assumptions,
-        solana_program_runtime::{invoke_context::InvokeContext, with_mock_invoke_context},
+        solana_program_runtime::{
+            invoke_context::InvokeContext, with_mock_invoke_context,
+            with_mock_invoke_context_and_feature_set,
+        },
         solana_sbpf::{
             error::EbpfError, memory_region::MemoryRegion, program::SBPFVersion, vm::Config,
         },
@@ -2726,7 +2730,6 @@ mod tests {
         // many small unaligned allocs
         {
             prepare_mockup!(invoke_context, program_id, bpf_loader::id());
-            invoke_context.mock_set_feature_set(Arc::new(FeatureSet::default()));
             mock_create_vm!(vm, Vec::new(), Vec::new(), &mut invoke_context);
             let mut vm = vm.unwrap();
             let invoke_context = &mut vm.context_object_pointer;
@@ -4929,12 +4932,19 @@ mod tests {
         // doesn't exceed the expected usage.
         compute_budget.compute_unit_limit = expected_cus;
 
-        with_mock_invoke_context!(invoke_context, transaction_context, vec![]);
+        let feature_set = FeatureSet::all_enabled();
+        let feature_set = &feature_set;
+        with_mock_invoke_context_and_feature_set!(
+            invoke_context,
+            transaction_context,
+            feature_set,
+            vec![]
+        );
         invoke_context.environment_config = EnvironmentConfig::new(
             Hash::default(),
             0,
             &MockCallback {},
-            Arc::<FeatureSet>::default(),
+            feature_set,
             &sysvar_cache,
         );
 
@@ -4990,12 +5000,19 @@ mod tests {
         // doesn't exceed the expected usage.
         compute_budget.compute_unit_limit = expected_cus;
 
-        with_mock_invoke_context!(invoke_context, transaction_context, vec![]);
+        let feature_set = FeatureSet::all_enabled();
+        let feature_set = &feature_set;
+        with_mock_invoke_context_and_feature_set!(
+            invoke_context,
+            transaction_context,
+            feature_set,
+            vec![]
+        );
         invoke_context.environment_config = EnvironmentConfig::new(
             Hash::default(),
             0,
             &MockCallback {},
-            Arc::<FeatureSet>::default(),
+            feature_set,
             &sysvar_cache,
         );
 

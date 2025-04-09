@@ -9,7 +9,7 @@
 )]
 pub use solana_stake_interface::state::*;
 use {
-    agave_feature_set::FeatureSet,
+    agave_feature_set::{reduce_stake_warmup_cooldown, FeatureSetLookup},
     solana_account::{state_traits::StateMut, AccountSharedData, ReadableAccount},
     solana_clock::{Clock, Epoch},
     solana_instruction::error::InstructionError,
@@ -64,7 +64,8 @@ pub(crate) fn new_warmup_cooldown_rate_epoch(invoke_context: &InvokeContext) -> 
         .unwrap();
     invoke_context
         .get_feature_set()
-        .new_warmup_cooldown_rate_epoch(epoch_schedule.as_ref())
+        .activated_slot(&reduce_stake_warmup_cooldown::id())
+        .map(|slot| epoch_schedule.get_epoch(slot))
 }
 
 fn checked_add(a: u64, b: u64) -> Result<u64, InstructionError> {
@@ -318,7 +319,7 @@ pub fn delegate(
     clock: &Clock,
     stake_history: &StakeHistory,
     signers: &HashSet<Pubkey>,
-    feature_set: &FeatureSet,
+    feature_set: &dyn FeatureSetLookup,
 ) -> Result<(), InstructionError> {
     let vote_account = instruction_context
         .try_borrow_instruction_account(transaction_context, vote_account_index)?;
@@ -961,7 +962,7 @@ struct ValidatedDelegatedInfo {
 fn validate_delegated_amount(
     account: &BorrowedAccount,
     meta: &Meta,
-    feature_set: &FeatureSet,
+    feature_set: &dyn FeatureSetLookup,
 ) -> Result<ValidatedDelegatedInfo, InstructionError> {
     let stake_amount = account
         .get_lamports()

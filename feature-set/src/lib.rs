@@ -9,6 +9,12 @@ use {
     std::sync::LazyLock,
 };
 
+pub trait FeatureSetLookup {
+    fn is_active(&self, pubkey: &Pubkey) -> bool;
+
+    fn activated_slot(&self, feature_id: &Pubkey) -> Option<u64>;
+}
+
 #[cfg_attr(feature = "frozen-abi", derive(solana_frozen_abi_macro::AbiExample))]
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct FeatureSet {
@@ -23,6 +29,16 @@ impl Default for FeatureSet {
             active: AHashMap::new(),
             inactive: AHashSet::from_iter((*FEATURE_NAMES).keys().cloned()),
         }
+    }
+}
+
+impl FeatureSetLookup for FeatureSet {
+    fn is_active(&self, feature_id: &Pubkey) -> bool {
+        self.active.contains_key(feature_id)
+    }
+
+    fn activated_slot(&self, feature_id: &Pubkey) -> Option<u64> {
+        self.active.get(feature_id).copied()
     }
 }
 

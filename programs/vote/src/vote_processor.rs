@@ -127,7 +127,12 @@ declare_process_instruction!(Entrypoint, DEFAULT_COMPUTE_UNITS, |invoke_context|
                 &signers,
                 sysvar_cache.get_epoch_schedule()?.as_ref(),
                 sysvar_cache.get_clock()?.as_ref(),
-                invoke_context.get_feature_set(),
+                invoke_context
+                    .get_feature_set()
+                    .is_active(&feature_set::allow_commission_decrease_at_any_time::id()),
+                invoke_context.get_feature_set().is_active(
+                    &feature_set::commission_updates_only_allowed_in_first_half_of_epoch::id(),
+                ),
             )
         }
         VoteInstruction::Vote(vote) | VoteInstruction::VoteSwitch(vote, _) => {
@@ -144,14 +149,7 @@ declare_process_instruction!(Entrypoint, DEFAULT_COMPUTE_UNITS, |invoke_context|
                 get_sysvar_with_account_check::slot_hashes(invoke_context, instruction_context, 1)?;
             let clock =
                 get_sysvar_with_account_check::clock(invoke_context, instruction_context, 2)?;
-            vote_state::process_vote_with_account(
-                &mut me,
-                &slot_hashes,
-                &clock,
-                &vote,
-                &signers,
-                invoke_context.get_feature_set(),
-            )
+            vote_state::process_vote_with_account(&mut me, &slot_hashes, &clock, &vote, &signers)
         }
         VoteInstruction::UpdateVoteState(vote_state_update)
         | VoteInstruction::UpdateVoteStateSwitch(vote_state_update, _) => {
@@ -173,7 +171,6 @@ declare_process_instruction!(Entrypoint, DEFAULT_COMPUTE_UNITS, |invoke_context|
                 &clock,
                 vote_state_update,
                 &signers,
-                invoke_context.get_feature_set(),
             )
         }
         VoteInstruction::CompactUpdateVoteState(vote_state_update)
@@ -196,7 +193,6 @@ declare_process_instruction!(Entrypoint, DEFAULT_COMPUTE_UNITS, |invoke_context|
                 &clock,
                 vote_state_update,
                 &signers,
-                invoke_context.get_feature_set(),
             )
         }
         VoteInstruction::TowerSync(tower_sync)
@@ -216,7 +212,6 @@ declare_process_instruction!(Entrypoint, DEFAULT_COMPUTE_UNITS, |invoke_context|
                 &clock,
                 tower_sync,
                 &signers,
-                invoke_context.get_feature_set(),
             )
         }
         VoteInstruction::Withdraw(lamports) => {

@@ -169,7 +169,7 @@ impl Bank {
                     Hash::default(),
                     0,
                     &MockCallback {},
-                    self.feature_set.clone(),
+                    &*self.feature_set,
                     &sysvar_cache,
                 ),
                 None,

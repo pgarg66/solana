@@ -69,8 +69,8 @@ pub struct SvmTestEnvironment<'a> {
     pub test_entry: SvmTestEntry,
 }
 
-impl SvmTestEnvironment<'_> {
-    pub fn create(test_entry: SvmTestEntry) -> Self {
+impl<'a> SvmTestEnvironment<'a> {
+    pub fn create(test_entry: SvmTestEntry, feature_set: &'a mut FeatureSet) -> Self {
         let mock_bank = MockBankCallback::default();
 
         for (name, slot, authority) in &test_entry.initial_programs {
@@ -108,16 +108,16 @@ impl SvmTestEnvironment<'_> {
             ..Default::default()
         };
 
-        let mut feature_set = FeatureSet::default();
         for feature_id in &test_entry.enabled_features {
             feature_set.activate(feature_id, 0);
         }
 
         let processing_environment = TransactionProcessingEnvironment {
             blockhash: LAST_BLOCKHASH,
-            feature_set: feature_set.into(),
             blockhash_lamports_per_signature: LAMPORTS_PER_SIGNATURE,
-            ..TransactionProcessingEnvironment::default()
+            epoch_total_stake: 0,
+            feature_set,
+            rent_collector: None,
         };
 
         Self {
@@ -2314,7 +2314,8 @@ fn program_cache_update_tombstone() -> Vec<SvmTestEntry> {
 #[test_case(program_cache_update_tombstone())]
 fn svm_integration(test_entries: Vec<SvmTestEntry>) {
     for test_entry in test_entries {
-        let env = SvmTestEnvironment::create(test_entry);
+        let mut feature_set = FeatureSet::default();
+        let env = SvmTestEnvironment::create(test_entry, &mut feature_set);
         env.execute();
     }
 }
@@ -2373,7 +2374,8 @@ fn program_cache_create_account(remove_accounts_executable_flag_checks: bool) {
             test_entry.decrease_expected_lamports(&fee_payer, LAMPORTS_PER_SIGNATURE);
         }
 
-        let mut env = SvmTestEnvironment::create(test_entry);
+        let mut feature_set = FeatureSet::default();
+        let mut env = SvmTestEnvironment::create(test_entry, &mut feature_set);
 
         // test in same entry as account creation
         env.execute();
@@ -2477,7 +2479,8 @@ fn svm_inspect_account() {
     let initial_test_entry = initial_test_entry;
 
     // Load and execute the transaction
-    let mut env = SvmTestEnvironment::create(initial_test_entry.clone());
+    let mut feature_set = FeatureSet::default();
+    let mut env = SvmTestEnvironment::create(initial_test_entry.clone(), &mut feature_set);
     env.execute();
 
     // do another transfer; recipient should be alive now
@@ -2571,7 +2574,8 @@ fn svm_inspect_account() {
 #[test]
 fn svm_metrics_accumulation() {
     for test_entry in program_medley() {
-        let env = SvmTestEnvironment::create(test_entry);
+        let mut feature_set = FeatureSet::default();
+        let env = SvmTestEnvironment::create(test_entry, &mut feature_set);
 
         let (transactions, check_results) = env.test_entry.prepare_transactions();
 
